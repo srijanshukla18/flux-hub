@@ -1,0 +1,38 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: podinfo-public
+  namespace: flux-demo
+spec:
+  interval: 1m0s
+  url: https://github.com/stefanprodan/podinfo
+  ref:
+    branch: master
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+kind: Kustomization
+metadata:
+  name: podinfo-bad-path
+  namespace: flux-demo
+spec:
+  interval: 1m0s
+  path: ./definitely-not-here
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: podinfo-public
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta2
+kind: Alert
+metadata:
+  name: flux-hub-errors-public
+  namespace: flux-demo
+spec:
+  providerRef:
+    name: flux-hub-webhook
+  eventSeverity: error
+  eventSources:
+    - kind: GitRepository
+      name: podinfo-public
+    - kind: Kustomization
+      name: podinfo-bad-path

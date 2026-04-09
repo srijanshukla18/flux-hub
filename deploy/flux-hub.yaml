@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-hub
+  namespace: flux-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: flux-hub-readonly
+rules:
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-hub-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flux-hub-readonly
+subjects:
+  - kind: ServiceAccount
+    name: flux-hub
+    namespace: flux-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flux-hub
+  namespace: flux-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flux-hub
+  template:
+    metadata:
+      labels:
+        app: flux-hub
+    spec:
+      serviceAccountName: flux-hub
+      containers:
+        - name: flux-hub
+          image: flux-hub:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_PATH
+              value: /data/flux-hub.db
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flux-hub
+  namespace: flux-system
+spec:
+  selector:
+    app: flux-hub
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
