@@ -33,7 +33,6 @@ type App struct {
 	listenAddr  string
 	httpClient  *http.Client
 	github      GitHubConfig
-	slack       SlackConfig
 	store       *Store
 	startedAt   time.Time
 	watcher     *WatchController
@@ -59,7 +58,6 @@ func NewApp() (*App, error) {
 		listenAddr:  envOrDefault("LISTEN_ADDR", ":8080"),
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 		github:      loadGitHubConfig(),
-		slack:       loadSlackConfig(),
 		store:       store,
 		startedAt:   time.Now(),
 		watchStatus: &WatchStatus{},

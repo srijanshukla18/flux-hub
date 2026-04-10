@@ -15,55 +15,32 @@ import (
 )
 
 func (a *App) dispatch(evt FluxEvent) {
-	if err := a.dispatchSlack(evt); err != nil {
-		log.Printf("slack dispatch error: %v", err)
-	}
-	if err := a.dispatchGitHub(evt); err != nil {
-		log.Printf("github dispatch error: %v", err)
+	if err := a.dispatchGitHubComment(evt); err != nil {
+		log.Printf("github comment dispatch error: %v", err)
 	}
 }
 
-func (a *App) dispatchGitHub(evt FluxEvent) error {
-	if !a.github.Enabled {
-		log.Printf("github dispatch disabled")
+func (a *App) dispatchGitHubComment(evt FluxEvent) error {
+	if !a.github.Enabled || !a.github.PRComment {
+		log.Printf("github comment dispatch disabled")
 		return nil
 	}
 
 	sha := evt.CommitSHA()
 	if sha == "" {
-		log.Printf("github dispatch skipped: no commit sha found in revision=%q", evt.Revision())
+		log.Printf("github comment dispatch skipped: no commit sha found in revision=%q", evt.Revision())
 		return nil
 	}
-
-	statusPayload := map[string]any{
-		"state":       githubState(evt),
-		"context":     a.github.StatusContext,
-		"description": truncate(singleLine(evt.Message), 140),
-	}
-	statusPretty, _ := json.MarshalIndent(statusPayload, "", "  ")
 
 	if a.github.Token == "" || a.github.Repo == "" {
-		log.Printf("github dry-run status repo=%q sha=%q payload:\n%s", a.github.Repo, sha, string(statusPretty))
-		if a.github.PRComment {
-			comment := buildGitHubComment(evt)
-			commentPretty, _ := json.MarshalIndent(map[string]string{"body": comment}, "", "  ")
-			log.Printf("github dry-run pr-comment repo=%q sha=%q payload:\n%s", a.github.Repo, sha, string(commentPretty))
-		}
+		log.Printf("github comment dry-run skipped repo=%q sha=%q: set GITHUB_TOKEN and GITHUB_REPO", a.github.Repo, sha)
 		return nil
 	}
 
-	statusURL := fmt.Sprintf("%s/repos/%s/statuses/%s", strings.TrimRight(a.github.APIURL, "/"), a.github.Repo, sha)
 	headers := map[string]string{
 		"Authorization":        "Bearer " + a.github.Token,
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
-	}
-	if err := a.postJSON(statusURL, statusPayload, headers); err != nil {
-		return err
-	}
-
-	if !a.github.PRComment {
-		return nil
 	}
 
 	prs, err := a.fetchGitHubPullRequestsForCommit(sha)
@@ -151,15 +128,6 @@ func (a *App) sendJSON(method, url string, payload any, headers map[string]strin
 
 	log.Printf("dispatch ok method=%s url=%s status=%s", method, url, resp.Status)
 	return nil
-}
-
-func buildGitHubComment(evt FluxEvent) string {
-	revision := evt.Revision()
-	if revision == "" {
-		revision = "n/a"
-	}
-
-	return fmt.Sprintf("## Flux deployment event\n\n- **Kind:** `%s`\n- **Namespace:** `%s`\n- **Name:** `%s`\n- **Severity:** `%s`\n- **Reason:** `%s`\n- **Controller:** `%s`\n- **Revision:** `%s`\n\n### Message\n\n```text\n%s\n```\n", evt.InvolvedObject.Kind, evt.InvolvedObject.Namespace, evt.InvolvedObject.Name, evt.Severity, evt.Reason, evt.ReportingController, revision, evt.Message)
 }
 
 const gitHubTrackingCommentMarker = "<!-- flux-hub:tracking-comment -->"
@@ -404,7 +372,6 @@ func (a *App) fetchFileContentAtRef(ref, path string) ([]byte, error) {
 	if resp.Encoding != "base64" {
 		return nil, fmt.Errorf("unexpected encoding %q", resp.Encoding)
 	}
-	// GitHub wraps base64 in newlines
 	cleaned := strings.ReplaceAll(resp.Content, "\n", "")
 	return base64.StdEncoding.DecodeString(cleaned)
 }
@@ -453,7 +420,7 @@ func helmReleasesFromYAML(content []byte) []FluxObjectRef {
 	for {
 		var doc helmRelease
 		if err := decoder.Decode(&doc); err != nil {
-			break // EOF or parse error — stop
+			break
 		}
 		if strings.EqualFold(doc.Kind, "HelmRelease") && doc.Metadata.Name != "" {
 			refs = append(refs, FluxObjectRef{
@@ -464,14 +431,4 @@ func helmReleasesFromYAML(content []byte) []FluxObjectRef {
 		}
 	}
 	return refs
-}
-
-func githubState(evt FluxEvent) string {
-	if strings.EqualFold(evt.Severity, "error") {
-		return "error"
-	}
-	if strings.EqualFold(evt.Severity, "info") {
-		return "success"
-	}
-	return "failure"
 }

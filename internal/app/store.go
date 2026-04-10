@@ -84,6 +84,9 @@ func (a *App) dashboardViewModel(focus *FocusResolution) DashboardViewModel {
 			Files:   focus.Files,
 			Targets: focus.Targets,
 		}
+		if focus.Source != "" {
+			base.WatchDetail = focus.Source
+		}
 		base.FocusQuery = focus.RawParam
 		if strings.HasPrefix(focus.RawParam, "pr=") {
 			base.FocusPR = strings.TrimPrefix(focus.RawParam, "pr=")
@@ -117,6 +120,16 @@ func (a *App) dashboardViewModel(focus *FocusResolution) DashboardViewModel {
 		return base
 	}
 	objects = filterObjectsByFocus(objects, focus.Targets)
+	if len(objects) < len(focus.Targets) {
+		if err := a.hydrateFocusedObjects(focus.Targets); err == nil {
+			objects, err = a.store.ListObjects()
+			if err != nil {
+				base.WatchDetail = "store error: " + err.Error()
+				return base
+			}
+			objects = filterObjectsByFocus(objects, focus.Targets)
+		}
+	}
 
 	projected := projectObjects(objects)
 	targets := make([]TargetViewModel, 0, len(projected))
@@ -251,7 +264,7 @@ func eventRowViewModel(record EventRecord) EventRowViewModel {
 }
 
 func currentIssue(record FluxObjectRecord) (string, string) {
-	for _, condition := range []ConditionSnapshot{record.Stalled, record.Reconciling, record.Ready} {
+	for _, condition := range []ConditionSnapshot{record.Ready, record.Stalled, record.Reconciling} {
 		if condition.Reason != "" || condition.Message != "" {
 			return condition.Reason, condition.Message
 		}

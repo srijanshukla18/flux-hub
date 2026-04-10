@@ -44,7 +44,8 @@ templ DashboardContent(vm DashboardViewModel) {
 		<div class="wrap">
 			<div class="card">
 				<div class="card-hd">
-					<div class="brand">
+					<div class="brand-wrap">
+						<div class="brand">
 						<svg class="brand-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
 							<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
 							<path d="M12 3C14.5 6 16 9 16 12C16 15 14.5 18 12 21C9.5 18 8 15 8 12C8 9 9.5 6 12 3Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
@@ -54,6 +55,8 @@ templ DashboardContent(vm DashboardViewModel) {
 							<span class="brand-name">Flux Hub</span>
 							<span class="brand-sub">Flux deployment status</span>
 						</div>
+						</div>
+						<div class="usage-hint">Use <code>?pr=123</code>, <code>?sha=&lt;commit&gt;</code>, or <code>?kind=HelmRelease&amp;ns=&lt;ns&gt;&amp;name=&lt;name&gt;</code>.</div>
 					</div>
 					<div class={ "status-dot " + watchDotClass(vm.WatchMode) } title={ vm.WatchMode + " · " + vm.WatchDetail }></div>
 				</div>

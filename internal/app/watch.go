@@ -298,14 +298,14 @@ func deriveFluxObjectState(revision string, ready, reconciling, stalled Conditio
 	if strings.EqualFold(stalled.Status, "True") {
 		return "stalled"
 	}
+	if strings.EqualFold(ready.Status, "False") {
+		return "failed"
+	}
 	if strings.EqualFold(reconciling.Status, "True") {
 		return "reconciling"
 	}
 	if strings.EqualFold(ready.Status, "True") {
 		return "ready"
-	}
-	if strings.EqualFold(ready.Status, "False") {
-		return "failed"
 	}
 	if revision != "" {
 		return "observed"

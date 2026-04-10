@@ -164,8 +164,7 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	summary := evt.Summary()
 	summary["received_at"] = record.ReceivedAt.Format(http.TimeFormat)
-	summary["github_dispatch_mode"] = dispatchMode(a.github.Enabled, a.github.Token != "" && a.github.Repo != "")
-	summary["slack_dispatch_mode"] = dispatchMode(a.slack.Enabled, a.slack.WebhookURL != "")
+	summary["github_comment_mode"] = dispatchMode(a.github.Enabled && a.github.PRComment, a.github.Token != "" && a.github.Repo != "")
 	summary["event_session_key"] = record.SessionKey
 	pretty, _ := json.MarshalIndent(summary, "", "  ")
 	log.Printf("flux event received:\n%s", string(pretty))
