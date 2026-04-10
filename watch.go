@@ -26,6 +26,12 @@ type fluxWatchTarget struct {
 }
 
 func (a *App) runFluxWatches(ctx context.Context) error {
+	targetRefs := a.watcher.GetUnionFocus()
+	if len(targetRefs) == 0 {
+		a.watchStatus.Set("idle", "no Flux objects targeted — open a PR, SHA, or direct object to start watching")
+		return nil
+	}
+
 	cfg, err := loadKubeConfig()
 	if err != nil {
 		return err
@@ -40,41 +46,65 @@ func (a *App) runFluxWatches(ctx context.Context) error {
 		return err
 	}
 
+	// Discover the HelmRelease GVR from the cluster so we don't hardcode the
+	// API version (v2, v2beta1, etc.).
 	targets, err := discoverFluxWatchTargets(discoveryClient)
 	if err != nil {
 		return err
 	}
-
-	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynamicClient, 0, metav1.NamespaceAll, nil)
-	informers := make([]cache.SharedIndexInformer, 0, len(targets))
-	watchedNames := make([]string, 0, len(targets))
-
-	for _, target := range targets {
-		informer := factory.ForResource(target.GVR).Informer()
-		informers = append(informers, informer)
-		watchedNames = append(watchedNames, target.Name)
-		informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj any) {
-				a.handleWatchUpsert(obj)
-			},
-			UpdateFunc: func(_, newObj any) {
-				a.handleWatchUpsert(newObj)
-			},
-			DeleteFunc: func(obj any) {
-				a.handleWatchDelete(obj)
-			},
-		})
+	gvrByKind := map[string]schema.GroupVersionResource{}
+	for _, t := range targets {
+		gvrByKind[t.Name] = t.GVR
 	}
 
-	factory.Start(ctx.Done())
-	for _, informer := range informers {
-		if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
-			return fmt.Errorf("failed waiting for Flux informer cache sync")
+	// Create one informer per targeted object using a field selector so the
+	// API server only streams that single object.
+	type watchEntry struct {
+		factory  dynamicinformer.DynamicSharedInformerFactory
+		informer cache.SharedIndexInformer
+	}
+	entries := make([]watchEntry, 0, len(targetRefs))
+
+	for _, ref := range targetRefs {
+		gvr, ok := gvrByKind[ref.Kind]
+		if !ok {
+			return fmt.Errorf("%s CRD not found in cluster", ref.Kind)
+		}
+		refName := ref.Name // captured per iteration for the closure below
+		ns := ref.Namespace
+		if ns == "" {
+			ns = "default"
+		}
+		factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(
+			dynamicClient, 0, ns,
+			func(opts *metav1.ListOptions) {
+				opts.FieldSelector = "metadata.name=" + refName
+			},
+		)
+		informer := factory.ForResource(gvr).Informer()
+		_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    func(obj any) { a.handleWatchUpsert(obj) },
+			UpdateFunc: func(_, newObj any) { a.handleWatchUpsert(newObj) },
+			DeleteFunc: func(obj any) { a.handleWatchDelete(obj) },
+		})
+		entries = append(entries, watchEntry{factory, informer})
+	}
+
+	for _, e := range entries {
+		e.factory.Start(ctx.Done())
+	}
+	for _, e := range entries {
+		if !cache.WaitForCacheSync(ctx.Done(), e.informer.HasSynced) {
+			return fmt.Errorf("failed waiting for HelmRelease informer cache sync")
 		}
 	}
 
-	a.watchStatus.Set("connected", "watching "+strings.Join(watchedNames, ", "))
-	log.Printf("flux watches connected: %s", strings.Join(watchedNames, ", "))
+	names := make([]string, 0, len(targetRefs))
+	for _, r := range targetRefs {
+		names = append(names, r.Kind+" "+r.Namespace+"/"+r.Name)
+	}
+	a.watchStatus.Set("connected", strings.Join(names, ", "))
+	log.Printf("flux watches connected: %d objects: %s", len(targetRefs), strings.Join(names, ", "))
 	<-ctx.Done()
 	return nil
 }

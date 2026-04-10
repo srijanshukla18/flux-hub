@@ -12,6 +12,7 @@ type GitHubConfig struct {
 	APIURL        string
 	StatusContext string
 	PRComment     bool
+	FluxHubURL    string
 }
 
 type SlackConfig struct {
@@ -21,12 +22,13 @@ type SlackConfig struct {
 
 func loadGitHubConfig() GitHubConfig {
 	return GitHubConfig{
-		Enabled:       envBoolDefault("GITHUB_ENABLED", true),
+		Enabled:       envBoolDefault("GITHUB_ENABLED", false),
 		Token:         os.Getenv("GITHUB_TOKEN"),
 		Repo:          os.Getenv("GITHUB_REPO"),
 		APIURL:        envOrDefault("GITHUB_API_URL", "https://api.github.com"),
 		StatusContext: envOrDefault("GITHUB_STATUS_CONTEXT", "flux/deployment"),
-		PRComment:     strings.EqualFold(envOrDefault("GITHUB_PR_COMMENT", "true"), "true"),
+		PRComment:     strings.EqualFold(envOrDefault("GITHUB_PR_COMMENT", "false"), "true"),
+		FluxHubURL:    strings.TrimRight(os.Getenv("FLUX_HUB_URL"), "/"),
 	}
 }
 

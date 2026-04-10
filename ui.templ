@@ -11,44 +11,21 @@ templ Layout(title string, content templ.Component) {
 			<script src="https://unpkg.com/htmx.org@1.9.12"></script>
 			<script>
 				(function () {
-					const state = { dashboardAt: 0, sessionAt: 0 };
-					function visible() {
-						return document.visibilityState === "visible";
-					}
-					function triggerAll(selector) {
-						if (!window.htmx) return;
-						document.querySelectorAll(selector).forEach((el) => window.htmx.trigger(el, "flux-refresh"));
-					}
-					function sessionBody() {
-						return document.getElementById("session-body");
-					}
-					function sessionTerminal() {
-						const el = sessionBody();
-						return !!el && el.dataset.terminal === "true";
-					}
+					var last = 0;
 					function tick() {
-						if (!visible()) return;
-						const now = Date.now();
-						if (document.querySelector('[data-refresh-scope="dashboard"]') && now - state.dashboardAt >= 10000) {
-							triggerAll('[data-refresh-scope="dashboard"]');
-							state.dashboardAt = now;
-						}
-						const session = sessionBody();
-						if (session && !sessionTerminal() && now - state.sessionAt >= 5000) {
-							window.htmx.trigger(session, "flux-refresh");
-							state.sessionAt = now;
+						if (document.visibilityState !== "visible") return;
+						var now = Date.now();
+						if (now - last >= 8000) {
+							last = now;
+							document.querySelectorAll("[data-ar]").forEach(function (el) {
+								window.htmx && window.htmx.trigger(el, "ar");
+							});
 						}
 					}
 					document.addEventListener("visibilitychange", function () {
-						if (visible()) {
-							state.dashboardAt = 0;
-							state.sessionAt = 0;
-							tick();
-						}
+						if (document.visibilityState === "visible") { last = 0; tick(); }
 					});
-					document.addEventListener("DOMContentLoaded", function () {
-						setInterval(tick, 1000);
-					});
+					document.addEventListener("DOMContentLoaded", function () { setInterval(tick, 1000); });
 				})();
 			</script>
 		</head>
@@ -63,328 +40,158 @@ templ DashboardPage(vm DashboardViewModel) {
 }
 
 templ DashboardContent(vm DashboardViewModel) {
-	<div class="page-shell">
-		<header class="topbar">
-			<div class="brand">
-				<div class="brand-mark">Flux Hub</div>
-				<div class="brand-meta">read-only Flux state for developers</div>
+	<div class="shell">
+		<div class="wrap">
+			<div class="card">
+				<div class="card-hd">
+					<div class="brand">
+						<svg class="brand-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+							<path d="M12 3C14.5 6 16 9 16 12C16 15 14.5 18 12 21C9.5 18 8 15 8 12C8 9 9.5 6 12 3Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+							<circle cx="12" cy="12" r="2" fill="currentColor"/>
+						</svg>
+						<div class="brand-text">
+							<span class="brand-name">Flux Hub</span>
+							<span class="brand-sub">Flux deployment status</span>
+						</div>
+					</div>
+					<div class={ "status-dot " + watchDotClass(vm.WatchMode) } title={ vm.WatchMode + " · " + vm.WatchDetail }></div>
+				</div>
+				if vm.Focus == nil {
+					<div class="card-bd">
+						<div class="welcome-block">
+							<div class="welcome-title">Welcome.</div>
+							<div class="welcome-copy">Open a Flux Hub URL with query params to track a PR, commit, or direct Flux object.</div>
+						</div>
+					</div>
+				} else {
+					<div class="card-ft">
+						@FocusMeta(vm)
+					</div>
+				}
 			</div>
-			<nav class="topbar-links">
-				<span class="pill"><strong>Watch mode</strong> { vm.WatchMode }</span>
-				<span class="pill"><strong>Refreshed</strong> { vm.GeneratedAtLabel }</span>
-			</nav>
-		</header>
-
-		<section class="hero">
-			<div class="eyebrow">UI first. notifications second. cluster truth always.</div>
-			<h1 class="display-title">Track Flux like a deployment system, not a black hole.</h1>
-			<p class="lead">This dashboard now projects live Flux object state from Kubernetes watches into SQLite, then joins that with webhook events. Developers can see which targets are ready, reconciling, failed, or stalled without poking at raw <span class="code-chip">.status.conditions</span>.</p>
-			<div class="hero-meta">
-				<span class="pill"><strong>GitHub</strong> { vm.GitHubMode }</span>
-				<span class="pill"><strong>PR comments</strong> { vm.GitHubCommentMode }</span>
-				<span class="pill"><strong>Slack</strong> { vm.SlackMode }</span>
-				<span class="pill"><strong>Uptime</strong> { vm.UptimeLabel }</span>
-			</div>
-		</section>
-
-		<section class="notice-card">
-			<div class="notice-title">Read-only by design</div>
-			<p class="notice-copy">No auth guard. No reconcile buttons. No retry buttons. No cluster mutations. Flux Hub is meant for internal, VPN-only visibility, and every page is safe to browse because the product only reads Flux and Kubernetes state.</p>
-			<div class="status-pills">
-				<span class={ "pill " + integrationTone(vm.WatchMode) }><strong>Flux watches</strong> { vm.WatchMode }</span>
+			if vm.Focus != nil && vm.Focus.Error == "" && len(vm.Focus.Targets) > 0 {
+				<div id="status-panel" data-ar hx-get={ "/ui/status?" + vm.FocusQuery } hx-trigger="ar" hx-swap="innerHTML">
+					@StatusPanel(vm)
+				</div>
+			}
+			<div class="footer-bar">
+				<span class="ft-item">watch: <strong>{ vm.WatchMode }</strong></span>
 				if vm.WatchDetail != "" {
-					<span class="pill">{ vm.WatchDetail }</span>
+					<span class="ft-item dim">{ vm.WatchDetail }</span>
 				}
+				<span class="ft-item dim">{ vm.GeneratedAtLabel }</span>
 			</div>
-		</section>
-
-		<div class="dashboard-grid">
-			<section id="dashboard-summary" data-refresh-scope="dashboard" hx-get="/ui/summary" hx-trigger="flux-refresh" hx-swap="innerHTML">
-				@DashboardSummary(vm)
-			</section>
-
-			<div class="panel-grid">
-				<section id="dashboard-sessions" class="card panel" data-refresh-scope="dashboard" hx-get="/ui/sessions" hx-trigger="flux-refresh" hx-swap="innerHTML">
-					@DashboardSessions(vm)
-				</section>
-
-				<section class="card integration-card">
-					@IntegrationPanel(vm)
-				</section>
-			</div>
-
-			<section id="dashboard-events" class="card panel" data-refresh-scope="dashboard" hx-get="/ui/events" hx-trigger="flux-refresh" hx-swap="innerHTML">
-				@DashboardEvents(vm.Events)
-			</section>
-		</div>
-
-		<footer class="footer-note">
-			Flux Hub stores a read model in SQLite and keeps it warm via Kubernetes watches plus Flux notification events.
-		</footer>
-	</div>
-}
-
-templ DashboardSummary(vm DashboardViewModel) {
-	<div class="stats-grid">
-		<div class="card stat-card">
-			<div class="stat-label">Tracked Flux objects</div>
-			<div class="stat-value">{ vm.TrackedObjects }</div>
-			<div class="stat-footnote">Current Flux CRs projected into SQLite from Kubernetes watches.</div>
-		</div>
-		<div class="card stat-card">
-			<div class="stat-label">Failed or stalled</div>
-			<div class="stat-value tone-error">{ vm.FailedObjects }</div>
-			<div class="stat-footnote">Targets currently marked <span class="code-chip">failed</span> or <span class="code-chip">stalled</span>.</div>
-		</div>
-		<div class="card stat-card">
-			<div class="stat-label">Recent events</div>
-			<div class="stat-value">{ vm.RecentEvents }</div>
-			<div class="stat-footnote">Flux notification events persisted for timeline context.</div>
-		</div>
-		<div class="card stat-card">
-			<div class="stat-label">Deployment threads</div>
-			<div class="stat-value">{ vm.DeploymentThreads }</div>
-			<div class="stat-footnote">Grouped by commit SHA, revision, source, or object fallback.</div>
 		</div>
 	</div>
 }
 
-templ DashboardSessions(vm DashboardViewModel) {
-	<div class="panel-header">
-		<div>
-			<div class="section-kicker">Deployment threads</div>
-			<h2 class="section-title">Current status by thread</h2>
-			<p class="section-copy">Each thread is sessionized from watched Flux resource status first, with notification events layered in as supporting timeline signal.</p>
-		</div>
-		<div class="pill">visible tabs refresh every 10s</div>
-	</div>
-	if len(vm.Sessions) == 0 {
-		<div class="empty-state">No tracked Flux objects or events yet. Once the watches sync and Flux reconciles, sessions will show up here.</div>
+templ FocusMeta(vm DashboardViewModel) {
+	if vm.Focus.Error != "" {
+		<div class="focus-err">{ vm.Focus.Error }</div>
+	} else if len(vm.Focus.Targets) == 0 {
+		<div class="focus-empty">No tracked Flux objects resolved.</div>
 	} else {
-		<div class="session-list">
-			for _, session := range vm.Sessions {
-				@SessionCard(session)
+		<div class="focus-row">
+			<span class="focus-src">{ vm.Focus.Source }</span>
+			if vm.Focus.HeadSHA != "" {
+				<span class="chip dim">{ shortSHA(vm.Focus.HeadSHA) }</span>
+			}
+			if len(vm.Focus.Files) > 0 {
+				<span class="chip dim">{ len(vm.Focus.Files) } files</span>
+			}
+			<span class="chip dim">{ len(vm.Focus.Targets) } targets</span>
+		</div>
+	}
+}
+
+templ StatusPanel(vm DashboardViewModel) {
+	if len(vm.Targets) == 0 {
+		<div class="syncing">Waiting for watch to sync…</div>
+	} else {
+		for _, t := range vm.Targets {
+			@ReleaseCard(t)
+		}
+	}
+	if len(vm.Events) > 0 {
+		<div class="events-block">
+			<div class="events-hd">Events</div>
+			for _, e := range vm.Events {
+				@EventRow(e)
 			}
 		</div>
 	}
 }
 
-templ SessionCard(session SessionRowViewModel) {
-	<a href={ templ.URL(session.DetailHref) } class="session-card">
-		<div class="session-title-row">
-			<div>
-				<h3 class="session-title">{ session.Title }</h3>
-				<div class="session-subtitle">{ session.Subtitle }</div>
+templ ReleaseCard(t TargetViewModel) {
+	<div class={ "release-card " + t.StateClass }>
+		<div class="release-hd">
+			<div class="release-id">
+				<span class="release-ns">{ t.Namespace }</span>
+				<span class="sep">/</span>
+				<span class="release-name">{ t.Name }</span>
 			</div>
-			<div class={ "pill " + session.StateClass }>{ session.StateLabel }</div>
+			<div class={ "state-badge " + t.StateClass }>{ t.StateLabel }</div>
 		</div>
-		<div class="session-meta-row">
-			<span class="code-chip">revision { session.Revision }</span>
-			<span class="code-chip">commit { session.CommitSHA }</span>
-			<span class="pill">{ session.ResourceCount } resources</span>
-			<span class="pill">{ session.EventCount } events</span>
-			<span class="pill">updated { session.LastSeenLabel }</span>
+		<div class="release-meta">
+			<span class="chip dim">{ t.Kind }</span>
+			<span class="chip">{ t.Revision }</span>
+			<span class="chip dim">{ t.CommitSHA }</span>
+			<span class="chip dim">{ t.UpdatedAt }</span>
 		</div>
-		<div class="session-meta-row">
-			<span class="pill tone-success">{ session.ReadyCount } ready</span>
-			<span class="pill tone-orange">{ session.ReconcilingCount } reconciling</span>
-			<span class="pill tone-error">{ session.FailedCount } failed</span>
-			<span class="pill tone-error">{ session.StalledCount } stalled</span>
-		</div>
-		<p class="session-message">{ session.Blocker }</p>
-	</a>
-}
-
-templ IntegrationPanel(vm DashboardViewModel) {
-	<div class="card-header">
-		<div>
-			<div class="card-kicker">Delivery</div>
-			<h2 class="section-title">Outbound integrations</h2>
-			<p class="section-copy">The UI is the main surface. GitHub and Slack are convenience layers that mirror the read model outwards.</p>
-		</div>
-		<div class="pill htmx-indicator">refreshing…</div>
-	</div>
-	<div class="integration-list">
-		<div class="integration-row">
-			<div class="integration-label-row">
-				<div class="section-title">GitHub status</div>
-				<div class={ "pill " + integrationTone(vm.GitHubMode) }>{ vm.GitHubMode }</div>
-			</div>
-			<div class="meta-copy">Posts commit status for Flux-linked SHAs. If token or repo are missing, payloads are still generated in dry-run.</div>
-		</div>
-		<div class="integration-row">
-			<div class="integration-label-row">
-				<div class="section-title">GitHub PR comment</div>
-				<div class={ "pill " + integrationTone(vm.GitHubCommentMode) }>{ vm.GitHubCommentMode }</div>
-			</div>
-			<div class="meta-copy">Enabled by default. Flux Hub resolves PRs for a commit and comments there when GitHub credentials are present.</div>
-		</div>
-		<div class="integration-row">
-			<div class="integration-label-row">
-				<div class="section-title">Slack</div>
-				<div class={ "pill " + integrationTone(vm.SlackMode) }>{ vm.SlackMode }</div>
-			</div>
-			<div class="meta-copy">Optional ambient awareness only. Slack stays secondary to the UI.</div>
-		</div>
-	</div>
-}
-
-templ DashboardEvents(events []EventRowViewModel) {
-	<div class="event-header">
-		<div>
-			<div class="event-kicker">Notification timeline</div>
-			<h2 class="section-title">Recent Flux events</h2>
-			<p class="section-copy">Event history is still valuable, but it no longer has to pretend to be the only source of truth.</p>
-		</div>
-		<div class="pill">visible tabs refresh every 10s</div>
-	</div>
-	if len(events) == 0 {
-		<div class="empty-state">No events have been persisted yet. The live object state can still appear once watches connect.</div>
-	} else {
-		<div class="event-list">
-			for _, event := range events {
-				@EventCard(event)
+		if t.StateClass != "state-ready" && t.StateClass != "state-unknown" {
+			if t.Reason != "" || t.Message != "" || t.Diagnostic != nil {
+				<div class="release-detail">
+					if t.Reason != "" {
+						<div class="detail-reason">{ t.Reason }</div>
+					}
+					if t.Message != "" {
+						<pre class="detail-msg">{ t.Message }</pre>
+					}
+					if t.Diagnostic != nil {
+						<div class="diag-block">
+							<div class="detail-reason">Failure details</div>
+							<div class="diag-summary">{ t.Diagnostic.Summary }</div>
+							if len(t.Diagnostic.Objects) > 0 {
+								<div class="diag-list">
+									for _, obj := range t.Diagnostic.Objects {
+										<div class="diag-row">
+											<span class="chip dim">{ obj.Kind }</span>
+											<span class="diag-name">{ obj.Name }</span>
+											<span class="diag-status">{ obj.Status }</span>
+											if obj.Detail != "" {
+												<span class="diag-detail">{ obj.Detail }</span>
+											}
+										</div>
+									}
+								</div>
+							}
+							if len(t.Diagnostic.Events) > 0 {
+								<div class="diag-events">
+									for _, evt := range t.Diagnostic.Events {
+										<div class="diag-event-row">
+											<span class="chip dim">{ evt.Resource }</span>
+											<span class="diag-status">{ evt.Reason }</span>
+											<span class="diag-detail">{ evt.Message }</span>
+											<span class="diag-age dim">{ evt.Age }</span>
+										</div>
+									}
+								</div>
+							}
+						</div>
+					}
+				</div>
 			}
-		</div>
-	}
-}
-
-templ EventCard(event EventRowViewModel) {
-	<div class="event-card">
-		<div class="event-title-row">
-			<div>
-				<h3 class="event-title">{ event.ResourceLabel }</h3>
-				<div class="event-subtitle">{ event.Controller } <span class="inline-divider">·</span> { event.FluxTimeLabel }</div>
-			</div>
-			<div class={ "pill " + event.SeverityClass }>{ event.Severity }</div>
-		</div>
-		<div class="event-meta-row">
-			<span class="code-chip">reason { event.Reason }</span>
-			<span class="code-chip">revision { event.Revision }</span>
-			<span class="code-chip">commit { event.CommitSHA }</span>
-			<span class="pill">received { event.RelativeAge }</span>
-		</div>
-		<p class="event-message">{ event.ShortMessage }</p>
+		}
 	</div>
 }
 
-templ SessionPage(vm SessionPageViewModel) {
-	@Layout("Flux Hub — Session", SessionContent(vm))
-}
-
-templ SessionContent(vm SessionPageViewModel) {
-	<div class="page-shell">
-		<header class="topbar">
-			<div class="brand">
-				<div class="brand-mark">Flux Hub</div>
-				<div class="brand-meta">deployment thread detail</div>
-			</div>
-			<nav class="topbar-links">
-				<a class="back-link" href={ templ.URL("/") }>← Back to dashboard</a>
-			</nav>
-		</header>
-		<div class="detail-layout">
-			@SessionBodyRoot(vm)
-		</div>
+templ EventRow(e EventRowViewModel) {
+	<div class="event-row">
+		<span class={ "evt-sev " + e.SeverityClass }>{ e.Severity }</span>
+		<span class="evt-res">{ e.ResourceLabel }</span>
+		<span class="chip dim">{ e.Reason }</span>
+		<span class="evt-age dim">{ e.RelativeAge }</span>
+		<div class="evt-msg">{ e.ShortMessage }</div>
 	</div>
-}
-
-templ SessionBodyRoot(vm SessionPageViewModel) {
-	<section id="session-body" data-terminal={ boolString(vm.IsTerminal) } data-state={ vm.StateKey } hx-get={ vm.RefreshHref } hx-trigger="flux-refresh" hx-swap="outerHTML">
-		@SessionBody(vm)
-	</section>
-}
-
-templ SessionBody(vm SessionPageViewModel) {
-	<section class="card detail-summary">
-		<div class="detail-header">
-			<div>
-				<div class="detail-kicker">Deployment thread</div>
-				<h1 class="detail-title">{ vm.Title }</h1>
-				<div class="detail-subtitle">{ vm.Subtitle }</div>
-			</div>
-			<div class={ "pill " + vm.StateClass }>{ vm.StateLabel }</div>
-		</div>
-		<div class="detail-meta-row">
-			<span class="code-chip">revision { vm.Revision }</span>
-			<span class="code-chip">commit { vm.CommitSHA }</span>
-			<span class="pill">{ vm.ResourceCount } resources</span>
-			<span class="pill">{ vm.EventCount } events</span>
-			<span class="pill">updated { vm.LastSeenLabel }</span>
-		</div>
-		<div class="detail-meta-row">
-			<span class="pill tone-success">{ vm.ReadyCount } ready</span>
-			<span class="pill tone-orange">{ vm.ReconcilingCount } reconciling</span>
-			<span class="pill tone-error">{ vm.FailedCount } failed</span>
-			<span class="pill tone-error">{ vm.StalledCount } stalled</span>
-		</div>
-		<p class="session-message">{ vm.Blocker }</p>
-	</section>
-
-	<section class="card detail-events">
-		<div class="detail-header">
-			<div>
-				<div class="detail-kicker">Targets</div>
-				<h2 class="section-title">Current Flux object state</h2>
-				<p class="section-copy">These cards come from the watch-backed SQLite read model. This is the current truth, not just a past event stream.</p>
-			</div>
-		</div>
-		if len(vm.Targets) == 0 {
-			<div class="empty-state">No watched Flux objects are linked to this thread yet. Events may have arrived before the watcher projection caught up.</div>
-		} else {
-			<div class="detail-event-list">
-				for _, target := range vm.Targets {
-					<div class="event-card">
-						<div class="event-title-row">
-							<div>
-								<h3 class="event-title">{ target.Namespace } / { target.Kind } / { target.Name }</h3>
-								<div class="event-subtitle">source { target.Source } <span class="inline-divider">·</span> updated { target.UpdatedAt }</div>
-							</div>
-							<div class={ "pill " + target.StateClass }>{ target.StateLabel }</div>
-						</div>
-						<div class="detail-meta-row">
-							<span class="code-chip">revision { target.Revision }</span>
-							<span class="code-chip">commit { target.CommitSHA }</span>
-							<span class="code-chip">reason { target.Reason }</span>
-						</div>
-						<pre class="detail-message">{ target.Message }</pre>
-					</div>
-				}
-			</div>
-		}
-	</section>
-
-	<section class="card detail-events">
-		<div class="detail-header">
-			<div>
-				<div class="detail-kicker">Timeline</div>
-				<h2 class="section-title">Related Flux notifications</h2>
-				<p class="section-copy">Events remain useful for chronology, even now that session state comes from watched Flux status.</p>
-			</div>
-		</div>
-		if len(vm.Events) == 0 {
-			<div class="empty-state">No notification events are linked to this thread yet.</div>
-		} else {
-			<div class="detail-event-list">
-				for _, event := range vm.Events {
-					<div class="event-card">
-						<div class="event-title-row">
-							<div>
-								<h3 class="event-title">{ event.ResourceLabel }</h3>
-								<div class="event-subtitle">{ event.Controller } <span class="inline-divider">·</span> { event.FluxTimeLabel }</div>
-							</div>
-							<div class={ "pill " + event.SeverityClass }>{ event.Severity }</div>
-						</div>
-						<div class="detail-meta-row">
-							<span class="code-chip">reason { event.Reason }</span>
-							<span class="code-chip">revision { event.Revision }</span>
-							<span class="code-chip">commit { event.CommitSHA }</span>
-							<span class="pill">received { event.RelativeAge }</span>
-						</div>
-						<pre class="detail-message">{ event.Message }</pre>
-					</div>
-				}
-			</div>
-		}
-	</section>
 }

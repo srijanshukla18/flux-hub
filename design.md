@@ -2,104 +2,54 @@
 
 ## Goal
 
-Give developers a simple, read-only way to answer:
-- did Flux see my change?
-- is it still reconciling?
-- did it fail?
-- is it stalled?
+Answer: did my PR deploy? is it stuck? what's the error?
 
-The UI is the product.
-GitHub and Slack are extras.
+No dashboard. No overview. No team-wide status page. One PR, one set of HelmReleases, live status.
 
 ## Shape
 
-Single Go service.
+Single Go service: UI + webhook receiver + targeted Kubernetes watches + SQLite read model + optional GitHub/Slack dispatch.
 
-Contains:
-- UI
-- Flux webhook receiver
-- lazy shared Kubernetes watches
-- SQLite read model
-- optional GitHub/Slack dispatch
+If GitHub is enabled, webhook-driven GitHub updates can also:
+- set commit status
+- upsert one sticky PR tracking comment with the Flux Hub link
+
+## Usage flow
+
+1. Developer opens `/?pr=123` (or `/?sha=abc1234`)
+2. flux-hub calls GitHub to get changed files
+3. Parses YAML files for `kind: HelmRelease` → extracts name + namespace
+4. Watches only those specific HelmReleases in Kubernetes
+5. Page shows live state: READY / RECONCILING / FAILED / STALLED
+
+## Why targeted watches (not namespace-wide)
+
+With 200+ HelmReleases per namespace across multiple teams, watching everything is noisy and expensive. A PR typically touches 1–5 releases. With a `metadata.name=<name>` field selector, the API server streams only that specific object — not the full namespace list.
+
+One informer per targeted release. Clean and minimal.
+
+## Watch lifecycle
+
+- Watches are **lazy** — only start when a PR/SHA is provided
+- Idle timeout (`WATCH_IDLE_TIMEOUT`, default 2m) stops watches when UI goes inactive
+- Switching PR/SHA cancels the current watch goroutine and restarts with new targets
+- Retry with exponential backoff on watch failure
 
 ## Source of truth
 
 Two inputs:
-- **Flux watches** for current object state
-- **Flux notifications** for timeline/history
+- **Kubernetes watches** — current object state, projected into SQLite
+- **Flux notification events** — timeline context via `/webhook`
 
-Watched resources:
-- `GitRepository`
-- `Kustomization`
-- `HelmRelease`
+The UI reads the SQLite read model. The watch keeps it warm.
 
-The UI reads the projected SQLite state, not raw cluster objects.
+## HelmRelease extraction
 
-## Why this design
+Changed YAML files are fetched via GitHub contents API at the PR head SHA. Each file is parsed as multi-document YAML. Any document with `kind: HelmRelease` contributes a `{namespace, name}` pair.
 
-Notifications alone are not enough.
-They tell you something happened, but not always what is true right now.
+## Design constraints
 
-Watches are better for:
-- current state
-- progress
-- stall detection
-- session status
-
-Events are still useful for chronology.
-
-## Session model
-
-A session is grouped by:
-1. commit SHA
-2. revision
-3. source reference
-4. object fallback
-
-Current states:
-- `ready`
-- `reconciling`
-- `failed`
-- `stalled`
-- `observed`
-- `unknown`
-
-## API server load strategy
-
-Do not watch on backend startup forever.
-Do not poll Kubernetes on every UI request.
-Do not start one watch per tab.
-
-Use:
-- **lazy shared watches**
-- **single shared watch set** for all viewers
-- **retry with backoff** on watch failure
-- **idle timeout shutdown** when UI goes inactive
-
-Current behavior:
-- first UI request starts watches
-- hidden tabs stop auto-refresh
-- dashboard refreshes only while visible
-- terminal session pages stop auto-refresh
-- backend stops watches after `WATCH_IDLE_TIMEOUT`
-
-This keeps the design simple and avoids unnecessary control plane load.
-
-## Read-only promise
-
-No auth for now.
-Assumed internal-only access.
-
-No remediation features:
-- no retries
-- no reconcile buttons
-- no deletes
-- no patch/update of Flux objects
-
-RBAC is read-only for watched Flux resources.
-
-## Near-term future work
-
-- better stalled heuristics
-- GitHub merge webhook for true `pending` before Flux reacts
-- workload enrichment for Pods / Jobs / runtime failures
+- **Read-only** — no writes to cluster, no reconcile buttons, no retries
+- **No auth** — assumed internal/VPN-only access
+- **One page** — no navigation, no sub-pages, no sessions view
+- **Terse UI** — minimal copy, no marketing text; errors are shown in full

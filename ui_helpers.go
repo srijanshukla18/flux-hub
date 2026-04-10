@@ -15,24 +15,17 @@ func renderComponent(w http.ResponseWriter, r *http.Request, component templ.Com
 	}
 }
 
-func integrationTone(mode string) string {
+func watchDotClass(mode string) string {
 	switch mode {
-	case "enabled", "connected", "ready":
-		return "tone-success"
-	case "dry-run", "reconciling", "connecting":
-		return "tone-orange"
-	case "degraded", "failed", "stalled":
-		return "tone-error"
+	case "connected":
+		return "dot-connected"
+	case "connecting":
+		return "dot-connecting"
+	case "degraded":
+		return "dot-degraded"
 	default:
-		return "tone-muted"
+		return "dot-idle"
 	}
-}
-
-func boolString(v bool) string {
-	if v {
-		return "true"
-	}
-	return "false"
 }
 
 func shortSHA(sha string) string {
@@ -47,7 +40,6 @@ func relativeTime(t time.Time) string {
 	if d < 0 {
 		d = -d
 	}
-
 	switch {
 	case d < time.Minute:
 		return fmt.Sprintf("%ds ago", int(d.Seconds()))
