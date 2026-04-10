@@ -1,14 +1,15 @@
-package main
+package app
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 )
 
-func main() {
+func Run() error {
 	app, err := NewApp()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer func() {
 		if err := app.Close(); err != nil {
@@ -25,6 +26,7 @@ func main() {
 
 	log.Printf("flux-hub listening on %s", app.listenAddr)
 	if err := http.ListenAndServe(app.listenAddr, requestLogger(mux)); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("listen and serve: %w", err)
 	}
+	return nil
 }
